@@ -2,7 +2,7 @@
   "name": "Despensa",
   "short_name": "Despensa",
   "description": "Despensa, compras, cocina y hábitos para comer mejor y bajar de peso.",
-  "id": "./",
+  "id": "/despensa/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
