@@ -75,7 +75,7 @@ button, input, select { font: inherit; color: inherit; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-input[type=text], input[type=number], input[type=date], input[type=search], select {
+input[type=text], input[type=number], input[type=date], input[type=search], select, textarea {
   width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 11px; min-width: 0;
 }
 .form { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); align-items: end; }
@@ -108,11 +108,16 @@ input[type=text], input[type=number], input[type=date], input[type=search], sele
 canvas { max-width: 100%; }
 .lienzo { position: relative; height: 220px; min-width: 0; }
 .vacio { color: var(--muted); text-align: center; padding: 24px 0; }
+textarea { min-height: 96px; resize: vertical; font-size: 0.9rem; }
+.foto-prev { width: 100%; max-height: 300px; object-fit: cover; border-radius: 12px; display: block; }
+.miniatura { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; vertical-align: middle; margin-right: 8px; }
+.paso { display: flex; gap: 10px; align-items: baseline; }
+.paso b { flex: none; width: 24px; height: 24px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); display: grid; place-content: center; font-size: .8rem; }
 
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line);
   padding: 0 max(8px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(8px, env(safe-area-inset-left, 0px)); }
-.nav-in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); height: var(--nav-h); }
-.tab { border: 0; background: none; cursor: pointer; display: grid; place-content: center; gap: 2px; color: var(--muted); font-size: 0.72rem; font-weight: 600; border-top: 3px solid transparent; }
+.nav-in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); height: var(--nav-h); }
+.tab { border: 0; background: none; cursor: pointer; display: grid; place-content: center; gap: 2px; color: var(--muted); font-size: 0.68rem; font-weight: 600; border-top: 3px solid transparent; padding: 0; min-width: 0; }
 .tab svg { width: 22px; height: 22px; margin: 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tab[aria-selected="true"] { color: var(--accent); border-top-color: var(--accent); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: .9rem; z-index: 9; }
@@ -127,6 +132,7 @@ canvas { max-width: 100%; }
   </header>
   <main>
     <section class="view" id="v-hoy"></section>
+    <section class="view" id="v-foto" hidden></section>
     <section class="view" id="v-despensa" hidden></section>
     <section class="view" id="v-compras" hidden></section>
     <section class="view" id="v-cocina" hidden></section>
@@ -137,6 +143,7 @@ canvas { max-width: 100%; }
 <nav class="nav" aria-label="Secciones">
   <div class="nav-in" role="tablist">
     <button class="tab" role="tab" data-vista="hoy" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Hoy</button>
+    <button class="tab" role="tab" data-vista="foto" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>Foto</button>
     <button class="tab" role="tab" data-vista="despensa" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 6h4M10 12h4M10 18h4"/></svg>Despensa</button>
     <button class="tab" role="tab" data-vista="compras" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20.5 8H6"/><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/></svg>Compras</button>
     <button class="tab" role="tab" data-vista="cocina" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M9 9c0-2 2-2 2-4M13 9c0-2 2-2 2-4"/></svg>Cocina</button>
@@ -286,7 +293,7 @@ function renderHoy() {
     <div class="card">
       <h2>Comidas de hoy</h2>
       ${r.comidas.length ? `<div class="lista">${r.comidas.map((c, i) => `
-        <div class="item"><span class="t">${esc(c.nombre)}</span><span class="s">${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}</span>
+        <div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">${c.estimado ? "≈ " : ""}${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}${c.comida ? " · " + c.comida : ""}${c.estimado ? " · estimado por foto" : ""}</span>
         <span class="d"><button class="btn chico peligro" data-quitar-comida="${i}" aria-label="Quitar ${esc(c.nombre)}">Quitar</button></span></div>`).join("")}</div>`
         : `<div class="nota">Anota lo que comes para ver si llegas a tu proteína. Desde Cocina, "Comí esto" lo anota solo.</div>`}
       <form class="form" id="f-comida">
@@ -328,6 +335,127 @@ function ultimoPeso() {
 function diasActivosSemana() {
   const l = lunesDe(hoyISO());
   return Object.keys(E.registros).filter((f) => f >= l && E.registros[f].actividad.length).length;
+}
+
+/* ---------- Vista: Foto ----------
+   La app no analiza la imagen: la comparte con la app de Claude (gratis, con la suscripción del usuario)
+   y luego lee la línea "DESPENSA:" de la respuesta que se pega. Solo el plato pendiente guarda la foto
+   (800 px); lo anotado en Hoy guarda una miniatura. */
+const COMIDAS = ["desayuno", "almuerzo", "once", "cena", "colación"];
+const TAMANOS = ["chico", "normal", "grande"];
+function comidaPorHora(d = new Date()) {
+  const m = d.getHours() * 60 + d.getMinutes();
+  if (m >= 300 && m < 660) return "desayuno";
+  if (m >= 660 && m < 960) return "almuerzo";
+  if (m >= 960 && m < 1170) return "once";
+  if (m >= 1170) return "cena";
+  return "colación";
+}
+async function reducirImagen(fuente, lado, calidad) {
+  let img = await createImageBitmap(fuente, { imageOrientation: "from-image" }).catch(() => null);
+  if (!img) img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = URL.createObjectURL(fuente); });
+  const k = Math.min(1, lado / Math.max(img.width, img.height));
+  const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", calidad);
+}
+const dataURLaArchivo = async (url, nombre) => new File([await (await fetch(url)).blob()], nombre, { type: "image/jpeg" });
+function textoParaClaude(p) {
+  return `Estima el valor nutricional del plato de la foto (${p.comida}${p.que ? ": " + p.que : ""}, porción ${p.tamano}). ` +
+    `Es para mi registro: dame un rango aproximado, no un valor exacto, y di qué alimentos ves con sus gramos aproximados. ` +
+    `Termina con una sola línea exactamente con este formato, con tus números:\n` +
+    `DESPENSA: kcal 600-700 | proteina 35-45 | grasa 15-20 | carbos 60-75 | plato Pollo con arroz`;
+}
+// Lee la línea DESPENSA (o, si no está, lo que encuentre en el texto). Un rango "600-700" queda en 650.
+function leerRespuesta(txt) {
+  const linea = (txt.split(/\r?\n/).find((l) => /despensa\s*:/i.test(l)) || "").replace(/\*/g, "");
+  const base = (linea || txt).replace(/(\d)\.(\d{3})\b/g, "$1$2"); // 1.200 kcal → 1200
+  const valor = (re) => {
+    const m = base.match(re); if (!m) return null;
+    const a = Number(m[1]), b = Number(m[2] || m[1]);
+    return Math.round((a + b) / 2);
+  };
+  const n = "[~≈]?\\s*(\\d{1,4})(?:\\s*(?:-|–|a)\\s*[~≈]?\\s*(\\d{1,4}))?";
+  const out = {
+    kcal: valor(new RegExp("kcal\\s*:?\\s*" + n, "i")) ?? valor(new RegExp(n + "\\s*kcal", "i")),
+    proteina: valor(new RegExp("prote[ií]na\\s*:?\\s*" + n, "i")) ?? valor(new RegExp(n + "\\s*g\\s*(?:de\\s*)?prote", "i")),
+    grasa: valor(new RegExp("grasas?\\s*:?\\s*" + n, "i")),
+    carbos: valor(new RegExp("carb(?:os|ohidratos)?\\s*:?\\s*" + n, "i")),
+    plato: (linea.match(/plato\s*:?\s*([^|]+)/i) || [])[1]?.trim() || "",
+  };
+  return out.kcal || out.proteina ? out : null;
+}
+function renderFoto() {
+  const p = E.fotoPendiente, hoy = registro(hoyISO()).comidas.filter((c) => c.estimado);
+  if (!p) {
+    $("#v-foto").innerHTML = `
+      <div class="card">
+        <h2>Foto del plato</h2>
+        <div class="nota">Sácale una foto a lo que vas a comer. Claude estima calorías y proteína a partir de la imagen: es un valor aproximado, no exacto.</div>
+        <div class="chips"><label class="btn prim" for="foto-input">Sacar foto</label><label class="btn" for="foto-galeria">Elegir de la galería</label></div>
+        <input type="file" id="foto-input" accept="image/*" capture="environment" hidden>
+        <input type="file" id="foto-galeria" accept="image/*" hidden>
+      </div>
+      <div class="card">
+        <h2>Hoy por foto</h2>
+        ${hoy.length ? `<div class="lista">${hoy.map((c) => `<div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">≈ ${c.kcal || "—"} kcal · ${c.proteina || "—"} g proteína · ${esc(c.comida || "")}</span></div>`).join("")}</div>`
+          : `<div class="nota">Todavía no anotas platos por foto hoy.</div>`}
+      </div>`;
+    return;
+  }
+  const d = p.datos || {};
+  $("#v-foto").innerHTML = `
+    <div class="card">
+      <img class="foto-prev" src="${p.img}" alt="Foto del plato">
+      <div class="form">
+        <label>Comida<select id="fp-comida">${COMIDAS.map((c) => `<option ${c === p.comida ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+        <label>Porción<select id="fp-tamano">${TAMANOS.map((t) => `<option ${t === p.tamano ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <label style="grid-column:1/-1">¿Qué es? (opcional, ayuda a estimar)<input type="text" id="fp-que" value="${esc(p.que)}" placeholder="Ej: pollo con arroz y ensalada"></label>
+      </div>
+    </div>
+    <div class="card">
+      <div class="paso"><b>1</b><div><h2>Analizar con Claude</h2><div class="nota">Se abre el menú de compartir: elige la app de Claude. La foto va con el texto ya escrito; el texto también queda copiado, pégalo si no aparece.</div></div></div>
+      <button class="btn prim" id="fp-compartir">Analizar con Claude</button>
+    </div>
+    <div class="card">
+      <div class="paso"><b>2</b><div><h2>Pega la respuesta</h2><div class="nota">En Claude, copia la respuesta completa y vuelve aquí. La app lee la última línea (DESPENSA: …).</div></div></div>
+      <textarea id="fp-resp" placeholder="Pega aquí la respuesta de Claude">${esc(p.resp || "")}</textarea>
+      <div class="chips"><button class="btn chico" id="fp-pegar">Pegar del portapapeles</button></div>
+      <div class="nota" id="fp-lectura">${p.resp ? (p.datos ? "Leído. Revisa y corrige si hace falta." : "No encontré calorías ni proteína en ese texto.") : ""}</div>
+    </div>
+    <form class="card" id="f-foto">
+      <div class="paso"><b>3</b><h2>Anotar en Hoy</h2></div>
+      <div class="form">
+        <label style="grid-column:1/-1">Plato<input type="text" id="fp-plato" required value="${esc(d.plato || p.que || "")}" placeholder="Ej: pollo con arroz"></label>
+        <label>Calorías<input type="number" id="fp-kcal" inputmode="numeric" min="0" max="3000" value="${d.kcal ?? ""}"></label>
+        <label>Proteína (g)<input type="number" id="fp-prot" inputmode="numeric" min="0" max="200" value="${d.proteina ?? ""}"></label>
+        <label>Grasa (g)<input type="number" id="fp-grasa" inputmode="numeric" min="0" max="300" value="${d.grasa ?? ""}"></label>
+        <label>Carbohidratos (g)<input type="number" id="fp-carbos" inputmode="numeric" min="0" max="500" value="${d.carbos ?? ""}"></label>
+      </div>
+      <div class="chips"><button class="btn prim" type="submit">Anotar en Hoy</button><button class="btn peligro" type="button" id="fp-descartar">Descartar foto</button></div>
+    </form>`;
+}
+function leerYMostrar(txt) {
+  const p = E.fotoPendiente; if (!p) return;
+  p.resp = txt; p.datos = leerRespuesta(txt);
+  const d = p.datos || {};
+  if (d.plato) $("#fp-plato").value = d.plato;
+  [["kcal", "fp-kcal"], ["proteina", "fp-prot"], ["grasa", "fp-grasa"], ["carbos", "fp-carbos"]].forEach(([k, id]) => { if (d[k] != null) $("#" + id).value = d[k]; });
+  $("#fp-lectura").textContent = !txt.trim() ? "" : p.datos ? "Leído. Revisa y corrige si hace falta." : "No encontré calorías ni proteína en ese texto.";
+  guardar(); // si Android cierra la app mientras estás en Claude, la respuesta pegada no se pierde
+}
+async function compartirConClaude() {
+  const p = E.fotoPendiente, texto = textoParaClaude(p);
+  try { await navigator.clipboard.writeText(texto); } catch (e) {}
+  const archivo = await dataURLaArchivo(p.img, `plato-${hoyISO()}.jpg`);
+  if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+    try { await navigator.share({ files: [archivo], text: texto }); }
+    catch (e) { if (e.name !== "AbortError") toast("No se pudo compartir"); }
+    return;
+  }
+  // Sin menú de compartir (p. ej. en el PC): se descarga la foto y el texto queda copiado
+  const a = document.createElement("a"); a.href = p.img; a.download = archivo.name; a.click();
+  toast("Foto descargada y texto copiado: súbelos a Claude");
 }
 
 /* ---------- Vista: Despensa ---------- */
@@ -494,7 +622,7 @@ function renderProgreso() {
 }
 
 /* ---------- Navegación y eventos ---------- */
-const VISTAS = { hoy: ["Hoy", renderHoy], despensa: ["Despensa", renderDespensa], compras: ["Compras", renderCompras], cocina: ["Cocina", renderCocina], progreso: ["Progreso", renderProgreso] };
+const VISTAS = { hoy: ["Hoy", renderHoy], foto: ["Foto del plato", renderFoto], despensa: ["Despensa", renderDespensa], compras: ["Compras", renderCompras], cocina: ["Cocina", renderCocina], progreso: ["Progreso", renderProgreso] };
 let vista = "hoy";
 function mostrar(v) {
   if (!VISTAS[v]) v = "hoy"; vista = v;
@@ -537,6 +665,13 @@ document.addEventListener("click", (e) => {
   if (d.quitarMenu) { const [dia, c] = d.quitarMenu.split("|"); delete E.menu[semanaActual()][dia][c]; refrescar(); return; }
   if (d.faltan) { d.faltan.split("|").forEach((n) => agregarALista(n, alimentoDe(n), "cocina")); guardar(); toast("Agregado a Compras"); return; }
   if (d.comi) { r.comidas.push({ nombre: d.comi, proteina: Number(d.prot) || null, kcal: null }); guardar(); toast("Anotado en Hoy"); return; }
+  if (b.id === "fp-compartir") { compartirConClaude(); return; }
+  if (b.id === "fp-pegar") {
+    if (!navigator.clipboard?.readText) { toast("Mantén presionado el cuadro y elige Pegar"); return; }
+    navigator.clipboard.readText().then((t) => { $("#fp-resp").value = t; leerYMostrar(t); guardar(); }, () => toast("Mantén presionado el cuadro y elige Pegar"));
+    return;
+  }
+  if (b.id === "fp-descartar") { if (confirm("¿Descartar esta foto?")) { E.fotoPendiente = null; refrescar(); } return; }
   if (b.id === "exportar") {
     const blob = new Blob([JSON.stringify(E, null, 1)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `despensa-respaldo-${hoyISO()}.json`; a.click();
@@ -552,6 +687,15 @@ document.addEventListener("change", (e) => {
     E.menu[sem] = E.menu[sem] || {}; E.menu[sem][dia] = E.menu[sem][dia] || {}; E.menu[sem][dia][c] = t.dataset.asignar;
     toast(`${dia} ${c}: listo`); refrescar(); return;
   }
+  if ((t.id === "foto-input" || t.id === "foto-galeria") && t.files[0]) {
+    reducirImagen(t.files[0], 800, 0.72).then((img) => {
+      E.fotoPendiente = { img, comida: comidaPorHora(), tamano: "normal", que: "", resp: "", datos: null, hora: new Date().toISOString() };
+      refrescar();
+    }).catch(() => toast("No se pudo leer la foto"));
+    return;
+  }
+  if (E.fotoPendiente && ["fp-comida", "fp-tamano", "fp-que"].includes(t.id)) { E.fotoPendiente[t.id.slice(3)] = t.value; guardar(); return; }
+  if (t.id === "fp-resp") { guardar(); return; }
   if (t.classList.contains("importar") && t.files[0]) {
     t.files[0].text().then(async (txt) => {
       const x = JSON.parse(txt);
@@ -566,7 +710,7 @@ document.addEventListener("change", (e) => {
     }).catch(() => toast("Ese archivo no es de Despensa")).finally(() => { t.value = ""; });
   }
 });
-document.addEventListener("input", (e) => { if (e.target.id === "buscar") { ui.texto = e.target.value; const pos = e.target.selectionStart; renderCocina(); const s = $("#buscar"); s.focus(); s.setSelectionRange(pos, pos); } });
+document.addEventListener("input", (e) => { if (e.target.id === "fp-resp") { leerYMostrar(e.target.value); return; } if (e.target.id === "buscar") { ui.texto = e.target.value; const pos = e.target.selectionStart; renderCocina(); const s = $("#buscar"); s.focus(); s.setSelectionRange(pos, pos); } });
 document.addEventListener("submit", (e) => {
   e.preventDefault();
   const f = e.target, r = registro(hoyISO());
@@ -574,6 +718,15 @@ document.addEventListener("submit", (e) => {
   if (f.id === "f-sueno") { r.sueno_h = Number($("#s-h").value) || null; }
   if (f.id === "f-peso") { r.peso = Number($("#p-kg").value) || null; }
   if (f.id === "f-act") { r.actividad.push({ tipo: $("#a-tipo").value, min: Number($("#a-min").value) }); }
+  if (f.id === "f-foto" && E.fotoPendiente) {
+    const p = E.fotoPendiente, num = (id) => Number($("#" + id).value) || null;
+    fetch(p.img).then((r) => r.blob()).then((b) => reducirImagen(b, 120, 0.7)).catch(() => null).then((mini) => {
+      registro(hoyISO()).comidas.push({ nombre: $("#fp-plato").value.trim(), proteina: num("fp-prot"), kcal: num("fp-kcal"), grasa: num("fp-grasa"),
+        carbos: num("fp-carbos"), comida: p.comida, estimado: true, mini });
+      E.fotoPendiente = null; toast("Anotado en Hoy"); refrescar();
+    });
+    return;
+  }
   if (f.id === "f-lista") { agregarALista($("#l-nombre").value.trim(), null, "manual"); }
   if (f.id === "f-compra") {
     const p = $("#m-prod"), fecha = $("#m-fecha").value || hoyISO(), tienda = $("#m-tienda").value.trim() || "Carnicería";
