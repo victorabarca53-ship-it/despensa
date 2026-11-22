@@ -1,5 +1,5 @@
 // Sube la versión cada vez que cambien los archivos de la app.
-const CACHE = 'despensa-v7';
+const CACHE = 'despensa-v8';
 // Sin data/semilla.json: la versión publicada no la lleva (los datos entran por archivo).
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './favicon.ico',
