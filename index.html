@@ -21,10 +21,10 @@
 
 /* Layout: app de una columna (máx. 640 px), encabezado arriba y 5 pestañas abajo, pensada para el pulgar */
 :root {
-  /* Paleta elegante: marfil cálido, verde botella y detalles en dorado champaña */
+  /* Paleta elegante: marfil cálido, espresso y dorado (sin verde) */
   --bg: #F6F3EC; --surface: #FFFDF8; --ink: #1C1F1D; --muted: #6B6A62; --line: #E6E0D4;
-  --accent: #1F4D3A; --accent-ink: #FBF8F1; --accent-soft: #E3EBE4;
-  --gold: #8C6E2A; --gold-soft: #F3ECDB; --gold-line: #D9C9A3;
+  --accent: #2B2622; --accent-ink: #FBF8F1; --accent-soft: #ECE5D8;
+  --gold: #7F6324; --gold-soft: #F3ECDB; --gold-line: #D9C9A3;
   --chili: #A63D2A; --chili-soft: #F7E5DF; --warn: #8C6410; --warn-soft: #F6ECD3;
   --water: #2F5F86; --water-soft: #E1E9F1;
   --sombra: 0 1px 2px rgba(28, 31, 29, .04), 0 6px 18px rgba(28, 31, 29, .05);
@@ -38,7 +38,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #111312; --surface: #1A1D1B; --ink: #ECE6DA; --muted: #A7A194; --line: #2B2F2C;
-    --accent: #8DBFA0; --accent-ink: #111312; --accent-soft: #1F2E25;
+    --accent: #E6DCC8; --accent-ink: #111312; --accent-soft: #2A2620;
     --gold: #CDB27A; --gold-soft: #2B2619; --gold-line: #4A4130;
     --chili: #E8907A; --chili-soft: #3A221C; --warn: #E3C26E; --warn-soft: #352C14;
     --water: #86B3DA; --water-soft: #1A2836;
@@ -49,7 +49,7 @@
 }
 :root[data-theme="dark"] {
   --bg: #111312; --surface: #1A1D1B; --ink: #ECE6DA; --muted: #A7A194; --line: #2B2F2C;
-  --accent: #8DBFA0; --accent-ink: #111312; --accent-soft: #1F2E25;
+  --accent: #E6DCC8; --accent-ink: #111312; --accent-soft: #2A2620;
   --gold: #CDB27A; --gold-soft: #2B2619; --gold-line: #4A4130;
   --chili: #E8907A; --chili-soft: #3A221C; --warn: #E3C26E; --warn-soft: #352C14;
   --water: #86B3DA; --water-soft: #1A2836;
@@ -76,8 +76,8 @@ button, input, select { font: inherit; color: inherit; }
 .aviso { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; font-size: 0.85rem; }
 
 .top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 14px 0 10px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--gold-line); }
-.top h1 { font-size: 1.45rem; color: var(--accent); letter-spacing: -0.02em; }
-.top .sub { color: var(--muted); font-size: 0.85rem; }
+.top h1 { font-size: 1.45rem; color: var(--gold); letter-spacing: -0.02em; }
+.top .sub { color: var(--gold); font-size: 0.85rem; letter-spacing: 0.02em; }
 
 .view { display: grid; gap: 16px; padding-top: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--sombra); display: grid; gap: 10px; min-width: 0; }
@@ -148,7 +148,7 @@ textarea { min-height: 96px; resize: vertical; font-size: 0.9rem; }
 .nav-in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); height: var(--nav-h); }
 .tab { border: 0; background: none; cursor: pointer; display: grid; place-content: center; gap: 2px; color: var(--muted); font-size: 0.68rem; font-weight: 600; border-top: 3px solid transparent; padding: 0; min-width: 0; }
 .tab svg { width: 22px; height: 22px; margin: 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.tab[aria-selected="true"] { color: var(--accent); border-top-color: var(--gold); }
+.tab[aria-selected="true"] { color: var(--gold); border-top-color: var(--gold); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: .9rem; z-index: 9; }
 @media (prefers-reduced-motion: reduce) { .barra > span { transition: none; } }
 </style>
