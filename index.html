@@ -66,7 +66,12 @@ button, input, select { font: inherit; color: inherit; }
 .barra { height: 10px; background: var(--accent-soft); border-radius: 999px; overflow: hidden; }
 .barra > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s ease; }
 .barra.agua { background: var(--water-soft); } .barra.agua > span { background: var(--water); }
-.barra.alta > span { background: var(--chili); }
+.barra.alta > span, .barra.pasado > span { background: var(--chili); }
+.barra.cerca > span { background: var(--warn); }
+.nutri { display: grid; gap: 6px; }
+.txt-rojo { color: var(--chili); font-weight: 600; } .txt-warn { color: var(--warn); font-weight: 600; }
+.alerta { background: var(--chili-soft); color: var(--chili); border: 1px solid var(--chili); border-radius: 12px; padding: 10px 12px; font-size: 0.9rem; }
+.alerta ul { margin: 4px 0 0; padding-left: 18px; }
 
 .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
 .btn.prim { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
@@ -232,7 +237,55 @@ const esArchivoDatos = (x) => x && x.version && Array.isArray(x.compras) && x.id
 const esRespaldo = (x) => x && x.registros && Array.isArray(x.compras);
 
 /* ---------- Helpers de datos ---------- */
-const metas = () => (E.perfil.metas || { kcal: 2200, proteina: 150, agua_ml: 2500, sueno_h: 7.5, actividad_dias: 4 });
+// Metas de recomposición (nov 2026): la proteína es un mínimo; calorías, carbohidratos, grasa y azúcar son topes.
+const METAS_BASE = { kcal: 2200, proteina: 170, carbos: 220, grasa: 65, azucar: 50, agua_ml: 2500, sueno_h: 7.5, actividad_dias: 4 };
+const metas = () => ({ ...METAS_BASE, ...(E.perfil.metas || {}) });
+const NUTRIENTES = [["kcal", "Calorías", "kcal", "tope"], ["proteina", "Proteína", "g", "minimo"], ["carbos", "Carbohidratos", "g", "tope"],
+  ["grasa", "Grasa", "g", "tope"], ["azucar", "Azúcar", "g", "tope"]];
+const COMIDA_GRANDE = 900; // kcal en una sola comida
+const fmtN = (n) => Math.round(n).toLocaleString("es-CL");
+function totalesDia(fecha, extra) {
+  const t = { kcal: 0, proteina: 0, carbos: 0, grasa: 0, azucar: 0 };
+  [...(E.registros[fecha]?.comidas || []), ...(extra ? [extra] : [])].forEach((c) => Object.keys(t).forEach((k) => { t[k] += Number(c[k]) || 0; }));
+  return t;
+}
+// "cerca" desde el 90 % de un tope, "pasado" al superarlo; en la proteína, "ok" al llegar al mínimo
+function estadoNutriente(valor, meta, tipo) {
+  if (tipo === "minimo") return valor >= meta ? "ok" : "";
+  return valor > meta ? "pasado" : valor >= meta * 0.9 ? "cerca" : "";
+}
+function barraNutriente([k, nombre, uni, tipo], t, m) {
+  const v = t[k], meta = m[k], est = estadoNutriente(v, meta, tipo);
+  const pie = est === "pasado" ? `<div class="nota txt-rojo">Te pasaste por ${fmtN(v - meta)} ${uni}</div>`
+    : est === "cerca" ? `<div class="nota txt-warn">Te quedan ${fmtN(meta - v)} ${uni}</div>` : "";
+  return `<div class="nutri"><div class="fila"><span class="label">${nombre}${tipo === "minimo" ? " (mínimo)" : ""}</span><span class="num">${fmtN(v)} / ${fmtN(meta)} ${uni}</span></div>
+    <div class="barra ${est}" role="img" aria-label="${nombre}: ${fmtN(v)} de ${fmtN(meta)} ${uni}"><span style="width:${Math.min(100, v / meta * 100)}%"></span></div>${pie}</div>`;
+}
+// Aviso antes de anotar: cómo queda el día si se suma esta comida
+function avisoPrevio(extra) {
+  if (!["kcal", "proteina", "carbos", "grasa", "azucar"].some((k) => Number(extra[k]))) return { clase: "", html: "" };
+  const t = totalesDia(hoyISO(), extra), m = metas(), partes = [];
+  NUTRIENTES.forEach(([k, nombre, uni, tipo]) => {
+    if (tipo === "tope" && Number(extra[k]) && t[k] > m[k]) partes.push(`${nombre}: quedas en ${fmtN(t[k])} de ${fmtN(m[k])} ${uni} (te pasas por ${fmtN(t[k] - m[k])})`);
+  });
+  if ((Number(extra.kcal) || 0) > COMIDA_GRANDE) partes.push(`Esta comida sola tiene ${fmtN(extra.kcal)} kcal (más de ${fmtN(COMIDA_GRANDE)})`);
+  if (partes.length) return { clase: "alerta", html: partes.join("<br>") };
+  return { clase: "nota", html: `Con esto quedas en ${fmtN(t.kcal)} de ${fmtN(m.kcal)} kcal y ${fmtN(t.proteina)} de ${fmtN(m.proteina)} g de proteína.` };
+}
+function leerFormNutri(pref) {
+  const num = (id) => { const el = $("#" + pref + "-" + id); return el ? Number(el.value) || null : null; };
+  return { kcal: num("kcal"), proteina: num("prot"), carbos: num("carbos"), grasa: num("grasa"), azucar: num("azucar") };
+}
+function mostrarPrevio(pref) {
+  const el = $("#" + pref + "-prev"); if (!el) return;
+  const a = avisoPrevio(leerFormNutri(pref));
+  el.className = a.clase; el.innerHTML = a.html; el.hidden = !a.html;
+}
+function toastAnotado() {
+  const t = totalesDia(hoyISO()), m = metas();
+  const pasados = NUTRIENTES.filter(([k, , , tipo]) => tipo === "tope" && t[k] > m[k]).map(([, n]) => n.toLowerCase());
+  toast(pasados.length ? `Anotado · te pasaste en ${pasados.join(", ")}` : "Anotado en Hoy");
+}
 function registro(fecha) {
   if (!E.registros[fecha]) E.registros[fecha] = { peso: null, agua_ml: 0, sueno_h: null, actividad: [], comidas: [] };
   return E.registros[fecha];
@@ -265,9 +318,15 @@ const nombreMes = (m) => MESES[Number(m.slice(5, 7)) - 1] + " " + m.slice(0, 4);
 /* ---------- Vista: Hoy ---------- */
 const ACTIVIDADES = ["Trekking", "Trote", "Acondicionamiento", "Caminata", "Otra"];
 function renderHoy() {
-  const f = hoyISO(), r = registro(f), m = metas();
-  const prot = r.comidas.reduce((a, c) => a + (Number(c.proteina) || 0), 0);
-  const kcal = r.comidas.reduce((a, c) => a + (Number(c.kcal) || 0), 0);
+  const f = hoyISO(), r = registro(f), m = metas(), t = totalesDia(f);
+  const pasados = NUTRIENTES.filter(([k, , , tipo]) => tipo === "tope" && t[k] > m[k]);
+  const grandes = r.comidas.filter((c) => (Number(c.kcal) || 0) > COMIDA_GRANDE);
+  const quedan = m.kcal - t.kcal, faltan = m.proteina - t.proteina;
+  const disp = disponibles();
+  // Platos altos en proteína que se pueden hacer completos con lo que hay
+  const proteicos = Object.entries(E.ideas).flatMap(([a, ps]) => disp.has(a) ? ps.filter((p) =>
+    (p.combina || []).every((c) => { const x = alimentoDe(c); return !x || x === a || disp.has(x); })) : []).filter((p) => p.proteina_g >= 20)
+    .sort((a, b) => b.proteina_g - a.proteina_g).filter((p, i, arr) => arr.findIndex((x) => x.plato === p.plato) === i).slice(0, 3);
   const actMin = r.actividad.reduce((a, x) => a + (Number(x.min) || 0), 0);
   const sugeridos = Object.values(E.ideas).flat().filter((p) => p.proteina_g >= 12).slice(0, 40);
   $("#v-hoy").innerHTML = `
@@ -276,10 +335,15 @@ function renderHoy() {
       <div class="nota">Carga el archivo de datos que te envié (despensa-datos-….json) para ver tu compra, los platos y los precios. Se hace una sola vez; después la app abre sola, incluso sin señal.</div>
       <div class="chips"><label class="btn prim" for="importar-hoy">Cargar archivo de datos</label><input type="file" id="importar-hoy" class="importar" accept="application/json,.json" hidden></div>
     </div>` : ""}
+    ${pasados.length || grandes.length ? `<div class="alerta" role="alert"><b>Atención</b><ul>
+      ${pasados.map(([k, nombre, uni]) => `<li>${nombre}: te pasaste por ${fmtN(t[k] - m[k])} ${uni} (${fmtN(t[k])} de ${fmtN(m[k])})</li>`).join("")}
+      ${grandes.map((c) => `<li>${esc(c.nombre)}: una sola comida de ${fmtN(c.kcal)} kcal</li>`).join("")}
+    </ul></div>` : ""}
     <div class="card">
-      <div class="fila"><span class="label">Proteína</span><span class="num">${prot} / ${m.proteina} g</span></div>
-      <div class="barra ${prot > m.proteina * 1.25 ? "alta" : ""}"><span style="width:${Math.min(100, prot / m.proteina * 100)}%"></span></div>
-      ${kcal ? `<div class="nota">Calorías anotadas: <span class="num">${kcal}</span> de ${m.kcal} kcal</div>` : ""}
+      <h2>Hoy comiste</h2>
+      ${NUTRIENTES.filter(([k]) => k !== "azucar" || t.azucar > 0).map((n) => barraNutriente(n, t, m)).join("")}
+      <div class="nota">${quedan >= 0 ? `Te quedan <b>${fmtN(quedan)} kcal</b>` : `Pasaste el tope por <b>${fmtN(-quedan)} kcal</b>`}${faltan > 0 ? ` y te faltan <b>${fmtN(faltan)} g de proteína</b>.` : " y ya cumpliste tu proteína."}</div>
+      ${faltan > 0 && proteicos.length ? `<div class="nota">Altos en proteína con lo que tienes: ${proteicos.map((p) => `${esc(p.plato)} (≈${p.proteina_g} g)`).join(" · ")}</div>` : ""}
     </div>
     <div class="card">
       <div class="fila"><span class="label">Agua</span><span class="num">${(r.agua_ml / 1000).toLocaleString("es-CL")} / ${(m.agua_ml / 1000).toLocaleString("es-CL")} L</span></div>
@@ -293,7 +357,7 @@ function renderHoy() {
     <div class="card">
       <h2>Comidas de hoy</h2>
       ${r.comidas.length ? `<div class="lista">${r.comidas.map((c, i) => `
-        <div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">${c.estimado ? "≈ " : ""}${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}${c.comida ? " · " + c.comida : ""}${c.estimado ? " · estimado por foto" : ""}</span>
+        <div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">${c.estimado ? "≈ " : ""}${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}${c.carbos ? " · " + c.carbos + " g carbos" : ""}${c.grasa ? " · " + c.grasa + " g grasa" : ""}${c.comida ? " · " + c.comida : ""}${c.estimado ? " · estimado por foto" : ""}${(Number(c.kcal) || 0) > COMIDA_GRANDE ? ` · <span class="txt-rojo">comida muy grande</span>` : ""}</span>
         <span class="d"><button class="btn chico peligro" data-quitar-comida="${i}" aria-label="Quitar ${esc(c.nombre)}">Quitar</button></span></div>`).join("")}</div>`
         : `<div class="nota">Anota lo que comes para ver si llegas a tu proteína. Desde Cocina, "Comí esto" lo anota solo.</div>`}
       <form class="form" id="f-comida">
@@ -302,7 +366,10 @@ function renderHoy() {
           <datalist id="dl-platos">${sugeridos.map((p) => `<option value="${esc(p.plato)}">`).join("")}</datalist>
         </label>
         <label>Proteína (g)<input type="number" id="c-prot" inputmode="numeric" min="0" max="200"></label>
-        <label>Calorías (opcional)<input type="number" id="c-kcal" inputmode="numeric" min="0" max="3000"></label>
+        <label>Calorías<input type="number" id="c-kcal" inputmode="numeric" min="0" max="5000"></label>
+        <label>Carbohidratos (g)<input type="number" id="c-carbos" inputmode="numeric" min="0" max="800"></label>
+        <label>Grasa (g)<input type="number" id="c-grasa" inputmode="numeric" min="0" max="400"></label>
+        <div id="c-prev" style="grid-column:1/-1" hidden></div>
         <button class="btn prim" type="submit">Anotar</button>
       </form>
     </div>
@@ -364,7 +431,7 @@ function textoParaClaude(p) {
   return `Estima el valor nutricional del plato de la foto (${p.comida}${p.que ? ": " + p.que : ""}, porción ${p.tamano}). ` +
     `Es para mi registro: dame un rango aproximado, no un valor exacto, y di qué alimentos ves con sus gramos aproximados. ` +
     `Termina con una sola línea exactamente con este formato, con tus números:\n` +
-    `DESPENSA: kcal 600-700 | proteina 35-45 | grasa 15-20 | carbos 60-75 | plato Pollo con arroz`;
+    `DESPENSA: kcal 600-700 | proteina 35-45 | grasa 15-20 | carbos 60-75 | azucar 5-10 | plato Pollo con arroz`;
 }
 // Lee la línea DESPENSA (o, si no está, lo que encuentre en el texto). Un rango "600-700" queda en 650.
 function leerRespuesta(txt) {
@@ -381,6 +448,7 @@ function leerRespuesta(txt) {
     proteina: valor(new RegExp("prote[ií]na\\s*:?\\s*" + n, "i")) ?? valor(new RegExp(n + "\\s*g\\s*(?:de\\s*)?prote", "i")),
     grasa: valor(new RegExp("grasas?\\s*:?\\s*" + n, "i")),
     carbos: valor(new RegExp("carb(?:os|ohidratos)?\\s*:?\\s*" + n, "i")),
+    azucar: valor(new RegExp("az[uú]car(?:es)?\\s*:?\\s*" + n, "i")),
     plato: (linea.match(/plato\s*:?\s*([^|]+)/i) || [])[1]?.trim() || "",
   };
   return out.kcal || out.proteina ? out : null;
@@ -427,20 +495,24 @@ function renderFoto() {
       <div class="paso"><b>3</b><h2>Anotar en Hoy</h2></div>
       <div class="form">
         <label style="grid-column:1/-1">Plato<input type="text" id="fp-plato" required value="${esc(d.plato || p.que || "")}" placeholder="Ej: pollo con arroz"></label>
-        <label>Calorías<input type="number" id="fp-kcal" inputmode="numeric" min="0" max="3000" value="${d.kcal ?? ""}"></label>
+        <label>Calorías<input type="number" id="fp-kcal" inputmode="numeric" min="0" max="5000" value="${d.kcal ?? ""}"></label>
         <label>Proteína (g)<input type="number" id="fp-prot" inputmode="numeric" min="0" max="200" value="${d.proteina ?? ""}"></label>
-        <label>Grasa (g)<input type="number" id="fp-grasa" inputmode="numeric" min="0" max="300" value="${d.grasa ?? ""}"></label>
-        <label>Carbohidratos (g)<input type="number" id="fp-carbos" inputmode="numeric" min="0" max="500" value="${d.carbos ?? ""}"></label>
+        <label>Grasa (g)<input type="number" id="fp-grasa" inputmode="numeric" min="0" max="400" value="${d.grasa ?? ""}"></label>
+        <label>Carbohidratos (g)<input type="number" id="fp-carbos" inputmode="numeric" min="0" max="800" value="${d.carbos ?? ""}"></label>
+        <label>Azúcar (g)<input type="number" id="fp-azucar" inputmode="numeric" min="0" max="400" value="${d.azucar ?? ""}"></label>
+        <div id="fp-prev" style="grid-column:1/-1" hidden></div>
       </div>
       <div class="chips"><button class="btn prim" type="submit">Anotar en Hoy</button><button class="btn peligro" type="button" id="fp-descartar">Descartar foto</button></div>
     </form>`;
+  mostrarPrevio("fp");
 }
 function leerYMostrar(txt) {
   const p = E.fotoPendiente; if (!p) return;
   p.resp = txt; p.datos = leerRespuesta(txt);
   const d = p.datos || {};
   if (d.plato) $("#fp-plato").value = d.plato;
-  [["kcal", "fp-kcal"], ["proteina", "fp-prot"], ["grasa", "fp-grasa"], ["carbos", "fp-carbos"]].forEach(([k, id]) => { if (d[k] != null) $("#" + id).value = d[k]; });
+  [["kcal", "fp-kcal"], ["proteina", "fp-prot"], ["grasa", "fp-grasa"], ["carbos", "fp-carbos"], ["azucar", "fp-azucar"]].forEach(([k, id]) => { if (d[k] != null) $("#" + id).value = d[k]; });
+  mostrarPrevio("fp");
   $("#fp-lectura").textContent = !txt.trim() ? "" : p.datos ? "Leído. Revisa y corrige si hace falta." : "No encontré calorías ni proteína en ese texto.";
   guardar(); // si Android cierra la app mientras estás en Claude, la respuesta pegada no se pierde
 }
@@ -583,6 +655,8 @@ function renderProgreso() {
   graficos.forEach((g) => g.destroy()); graficos = [];
   const m = metas(), dias = ultimosDias(14);
   const prot = dias.map((f) => (E.registros[f]?.comidas || []).reduce((a, c) => a + (Number(c.proteina) || 0), 0));
+  const kcalDia = dias.map((f) => totalesDia(f).kcal);
+  const diasSobre = kcalDia.filter((k) => k > m.kcal).length;
   const agua = dias.map((f) => (E.registros[f]?.agua_ml || 0) / 1000);
   const sueno = dias.map((f) => E.registros[f]?.sueno_h ?? null);
   const pesos = Object.keys(E.registros).filter((f) => E.registros[f].peso).sort().map((f) => ({ f, kg: E.registros[f].peso }));
@@ -594,8 +668,23 @@ function renderProgreso() {
       <div class="card"><span class="label">Proteína promedio</span><div class="grande">${promProt || "—"} <small>g/día</small></div><div class="nota">Meta ${m.proteina} g · días anotados</div></div>
     </div>
     <div class="card"><h2>Peso</h2>${pesos.length > 1 ? `<div class="lienzo"><canvas id="g-peso" role="img" aria-label="Gráfico de peso"></canvas></div>` : `<div class="nota">Anota tu peso una vez por semana (en ayunas) y aquí verás la tendencia.</div>`}</div>
+    <div class="card"><h2>Calorías, últimos 14 días</h2>
+      <div class="nota">${diasSobre ? `<span class="txt-rojo">${diasSobre} día${diasSobre > 1 ? "s" : ""} sobre el tope</span> de ${fmtN(m.kcal)} kcal.` : `Ningún día sobre el tope de ${fmtN(m.kcal)} kcal.`} Solo cuentan los días con calorías anotadas.</div>
+      <div class="lienzo"><canvas id="g-kcal" role="img" aria-label="Gráfico de calorías diarias contra el tope"></canvas></div></div>
     <div class="card"><h2>Proteína, últimos 14 días</h2><div class="lienzo"><canvas id="g-prot" role="img" aria-label="Gráfico de proteína diaria"></canvas></div></div>
     <div class="card"><h2>Agua y sueño</h2><div class="lienzo"><canvas id="g-agua" role="img" aria-label="Gráfico de agua y sueño"></canvas></div></div>
+    <form class="card" id="f-metas">
+      <h2>Mis metas diarias</h2>
+      <div class="nota">La proteína es un mínimo; lo demás son topes. La app avisa en amarillo desde el 90 % y en rojo al pasarte.</div>
+      <div class="form">
+        <label>Calorías (tope)<input type="number" id="mt-kcal" inputmode="numeric" min="1000" max="5000" value="${m.kcal}"></label>
+        <label>Proteína (mín. g)<input type="number" id="mt-proteina" inputmode="numeric" min="30" max="400" value="${m.proteina}"></label>
+        <label>Carbohidratos (g)<input type="number" id="mt-carbos" inputmode="numeric" min="30" max="800" value="${m.carbos}"></label>
+        <label>Grasa (g)<input type="number" id="mt-grasa" inputmode="numeric" min="20" max="300" value="${m.grasa}"></label>
+        <label>Azúcar (g)<input type="number" id="mt-azucar" inputmode="numeric" min="0" max="300" value="${m.azucar}"></label>
+        <button class="btn prim" type="submit">Guardar metas</button>
+      </div>
+    </form>
     <div class="card">
       <h2>Datos y respaldo</h2>
       <div class="nota">Tus datos viven solo en este teléfono. Descarga un respaldo cada semana y envíamelo cuando quieras que analice tu mes.</div>
@@ -608,6 +697,10 @@ function renderProgreso() {
   Chart.defaults.color = c("--muted"); Chart.defaults.borderColor = c("--line"); Chart.defaults.font.family = "Inter, system-ui, sans-serif";
   const etiquetas = dias.map((f) => f.slice(8) + "/" + f.slice(5, 7));
   const base = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels: { boxWidth: 12 } } }, scales: { x: { grid: { display: false } } } };
+  graficos.push(new Chart($("#g-kcal"), { type: "bar", data: { labels: etiquetas, datasets: [
+    { label: "Calorías", data: kcalDia, backgroundColor: kcalDia.map((k) => k > m.kcal ? c("--chili") : k >= m.kcal * 0.9 ? c("--warn") : c("--accent")), borderRadius: 4 },
+    { label: "Tope", data: dias.map(() => m.kcal), type: "line", borderColor: c("--ink"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 },
+  ] }, options: base }));
   graficos.push(new Chart($("#g-prot"), { type: "bar", data: { labels: etiquetas, datasets: [
     { label: "Proteína (g)", data: prot, backgroundColor: c("--accent"), borderRadius: 4 },
     { label: "Meta", data: dias.map(() => m.proteina), type: "line", borderColor: c("--chili"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 },
@@ -710,22 +803,35 @@ document.addEventListener("change", (e) => {
     }).catch(() => toast("Ese archivo no es de Despensa")).finally(() => { t.value = ""; });
   }
 });
-document.addEventListener("input", (e) => { if (e.target.id === "fp-resp") { leerYMostrar(e.target.value); return; } if (e.target.id === "buscar") { ui.texto = e.target.value; const pos = e.target.selectionStart; renderCocina(); const s = $("#buscar"); s.focus(); s.setSelectionRange(pos, pos); } });
+document.addEventListener("input", (e) => {
+  if (e.target.id === "fp-resp") { leerYMostrar(e.target.value); return; }
+  const pref = (e.target.id.match(/^(c|fp)-(kcal|prot|carbos|grasa|azucar)$/) || [])[1];
+  if (pref) { mostrarPrevio(pref); return; } if (e.target.id === "buscar") { ui.texto = e.target.value; const pos = e.target.selectionStart; renderCocina(); const s = $("#buscar"); s.focus(); s.setSelectionRange(pos, pos); } });
 document.addEventListener("submit", (e) => {
   e.preventDefault();
   const f = e.target, r = registro(hoyISO());
-  if (f.id === "f-comida") { r.comidas.push({ nombre: $("#c-nombre").value.trim(), proteina: Number($("#c-prot").value) || null, kcal: Number($("#c-kcal").value) || null }); }
+  if (f.id === "f-comida") {
+    const n = leerFormNutri("c");
+    r.comidas.push({ nombre: $("#c-nombre").value.trim(), proteina: n.proteina, kcal: n.kcal, carbos: n.carbos, grasa: n.grasa });
+    toastAnotado();
+  }
   if (f.id === "f-sueno") { r.sueno_h = Number($("#s-h").value) || null; }
   if (f.id === "f-peso") { r.peso = Number($("#p-kg").value) || null; }
   if (f.id === "f-act") { r.actividad.push({ tipo: $("#a-tipo").value, min: Number($("#a-min").value) }); }
   if (f.id === "f-foto" && E.fotoPendiente) {
-    const p = E.fotoPendiente, num = (id) => Number($("#" + id).value) || null;
+    const p = E.fotoPendiente, n = leerFormNutri("fp");
     fetch(p.img).then((r) => r.blob()).then((b) => reducirImagen(b, 120, 0.7)).catch(() => null).then((mini) => {
-      registro(hoyISO()).comidas.push({ nombre: $("#fp-plato").value.trim(), proteina: num("fp-prot"), kcal: num("fp-kcal"), grasa: num("fp-grasa"),
-        carbos: num("fp-carbos"), comida: p.comida, estimado: true, mini });
-      E.fotoPendiente = null; toast("Anotado en Hoy"); refrescar();
+      registro(hoyISO()).comidas.push({ nombre: $("#fp-plato").value.trim(), ...n, comida: p.comida, estimado: true, mini });
+      E.fotoPendiente = null; toastAnotado(); refrescar();
     });
     return;
+  }
+  if (f.id === "f-metas") {
+    const nuevas = { ...metas() };
+    ["kcal", "proteina", "carbos", "grasa", "azucar"].forEach((k) => { const v = Number($("#mt-" + k).value); if (v > 0) nuevas[k] = v; });
+    // "propio" sobrevive a los archivos de datos que se carguen después
+    E.perfil.metas = nuevas; E.perfil.propio = { ...(E.perfil.propio || {}), metas: nuevas };
+    toast("Metas guardadas");
   }
   if (f.id === "f-lista") { agregarALista($("#l-nombre").value.trim(), null, "manual"); }
   if (f.id === "f-compra") {
@@ -749,6 +855,11 @@ addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v !
 (async function iniciar() {
   E = (await DB.leer()) || estadoVacio();
   await cargarSemilla();
+  // Una vez: pasa las metas antiguas (proteína 150, sin topes) a las de recomposición, salvo que ya se hayan editado a mano
+  if (E.metasRevisadas !== "2026-11" && !E.perfil.propio?.metas) {
+    E.perfil.metas = { ...(E.perfil.metas || {}), kcal: 2200, proteina: 170, carbos: 220, grasa: 65, azucar: 50 };
+    E.metasRevisadas = "2026-11"; await guardar();
+  }
   estadoRed();
   mostrar((location.hash || "#hoy").slice(1));
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
