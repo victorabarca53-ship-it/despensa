@@ -128,6 +128,8 @@ input[type=text], input[type=number], input[type=date], input[type=search], sele
 .tiempo { white-space: nowrap; font-size: 0.78rem; border-radius: 999px; padding: 2px 9px; background: var(--accent-soft); }
 .tiempo.lento { background: var(--chili-soft); color: var(--chili); }
 .meta-mini { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.82rem; color: var(--muted); }
+.toque { background: var(--gold-soft); border-left: 3px solid var(--gold-line); border-radius: 10px; padding: 8px 12px; font-size: 0.88rem; }
+.toque b { color: var(--gold); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 2px; }
 .menu-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .menu-tabla th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 4px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; }
 .menu-tabla td { border-top: 1px solid var(--line); padding: 8px 4px; vertical-align: top; }
@@ -638,7 +640,7 @@ function renderCocina() {
   })));
   if (ui.soloDisponibles) platos = platos.filter((p) => disp.has(p.alimento));
   // Primero lo que se puede cocinar completo; luego por proteína
-  platos = platos.filter((p) => (!ui.tiempo || p.tiempo_min <= ui.tiempo) && (!q || (p.plato + " " + p.pasos + " " + (p.combina || []).join(" ")).toLowerCase().includes(q)))
+  platos = platos.filter((p) => (!ui.tiempo || p.tiempo_min <= ui.tiempo) && (!q || (p.plato + " " + p.pasos + " " + (p.toque || "") + " " + (p.combina || []).join(" ")).toLowerCase().includes(q)))
     .sort((a, b) => a.faltan.length - b.faltan.length || (b.proteina_g || 0) - (a.proteina_g || 0));
   $("#v-cocina").innerHTML = `
     <div class="card">
@@ -652,21 +654,22 @@ function renderCocina() {
       <input type="search" id="buscar" placeholder="Buscar plato o ingrediente" value="${esc(ui.texto)}" aria-label="Buscar plato">
       <div class="chips">${TIEMPOS.map(([t, x]) => `<button class="chip" data-tiempo="${t}" aria-pressed="${ui.tiempo === t}">${x}</button>`).join("")}
         <button class="chip" id="solo-disp" aria-pressed="${ui.soloDisponibles}">Solo con lo que tengo</button></div>
-      <div class="nota">${platos.length} platos${ui.soloDisponibles ? " con lo que hay en la despensa" : ""}. Proteína por porción aproximada.</div>
+      <div class="nota">${platos.length} platos${ui.soloDisponibles ? " con lo que hay en la despensa" : ""}. Proteína y kcal aproximadas por porción.</div>
     </div>
     <div class="lista">
       ${platos.map((p) => `
         <article class="card plato">
           <div class="fila"><h3>${esc(p.plato)}</h3><span class="tiempo num ${p.tiempo_min > 20 ? "lento" : ""}">${p.tiempo_min} min</span></div>
           ${p.pasos ? `<div>${esc(p.pasos)}</div>` : ""}
-          <div class="meta-mini">${p.proteina_g ? `<span><b class="num">≈${p.proteina_g} g</b> proteína</span>` : ""}${p.conservacion ? `<span>${esc(p.conservacion)}</span>` : ""}<span>con ${esc(nombreAlimento(p.alimento))}</span></div>
+          ${p.toque ? `<div class="toque"><b>El toque</b>${esc(p.toque)}</div>` : ""}
+          <div class="meta-mini">${p.proteina_g ? `<span><b class="num">≈${p.proteina_g} g</b> proteína</span>` : ""}${p.kcal ? `<span><b class="num">≈${fmtN(p.kcal)}</b> kcal</span>` : ""}${p.conservacion ? `<span>${esc(p.conservacion)}</span>` : ""}<span>con ${esc(nombreAlimento(p.alimento))}</span>${p.fuente ? `<span>idea de ${esc(p.fuente)}</span>` : ""}</div>
           ${p.faltan.length ? `<div class="aviso">Te falta: ${p.faltan.map(esc).join(", ")} <button class="btn chico" data-faltan="${esc(p.faltan.join("|"))}">A la lista</button></div>` : ""}
           <div class="fila">
             <select data-asignar="${esc(p.plato)}" aria-label="Agregar ${esc(p.plato)} al menú" style="width:auto;flex:1">
               <option value="">Agregar al menú…</option>
               ${DIAS.flatMap((d) => ["almuerzo", "cena"].map((c) => `<option value="${d}|${c}">${d} ${c}</option>`)).join("")}
             </select>
-            <button class="btn chico prim" data-comi="${esc(p.plato)}" data-prot="${p.proteina_g || 0}">Comí esto</button>
+            <button class="btn chico prim" data-comi="${esc(p.plato)}" data-prot="${p.proteina_g || 0}" data-kcal="${p.kcal || 0}">Comí esto</button>
           </div>
         </article>`).join("") || `<div class="vacio">Ningún plato coincide. Quita filtros o marca más productos como "Hay".</div>`}
     </div>`;
@@ -781,7 +784,7 @@ document.addEventListener("click", (e) => {
   if (b.id === "solo-disp") { ui.soloDisponibles = !ui.soloDisponibles; renderCocina(); return; }
   if (d.quitarMenu) { const [dia, c] = d.quitarMenu.split("|"); delete E.menu[semanaActual()][dia][c]; refrescar(); return; }
   if (d.faltan) { d.faltan.split("|").forEach((n) => agregarALista(n, alimentoDe(n), "cocina")); guardar(); toast("Agregado a Compras"); return; }
-  if (d.comi) { r.comidas.push({ nombre: d.comi, proteina: Number(d.prot) || null, kcal: null }); guardar(); toast("Anotado en Hoy"); return; }
+  if (d.comi) { r.comidas.push({ nombre: d.comi, proteina: Number(d.prot) || null, kcal: Number(d.kcal) || null, comida: comidaPorHora() }); guardar(); toast("Anotado en Hoy"); return; }
   if (b.id === "fp-compartir") { compartirConClaude(); return; }
   if (b.id === "fp-pegar") {
     if (!navigator.clipboard?.readText) { toast("Mantén presionado el cuadro y elige Pegar"); return; }
