@@ -128,6 +128,13 @@ input[type=text], input[type=number], input[type=date], input[type=search], sele
 .tiempo { white-space: nowrap; font-size: 0.78rem; border-radius: 999px; padding: 2px 9px; background: var(--accent-soft); }
 .tiempo.lento { background: var(--chili-soft); color: var(--chili); }
 .meta-mini { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.82rem; color: var(--muted); }
+.conteo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.conteo .grande small { margin-left: 2px; }
+.ia-items { display: grid; gap: 8px; }
+.ia-item { display: grid; grid-template-columns: 1fr 88px auto; gap: 8px; align-items: center; }
+.ia-item input { padding: 8px; }
+.ia-item .s { grid-column: 1 / -1; margin-top: -4px; font-size: 0.8rem; color: var(--muted); }
+.ia-total { border-top: 1px solid var(--line); padding-top: 8px; font-weight: 600; }
 .toque { background: var(--gold-soft); border-left: 3px solid var(--gold-line); border-radius: 10px; padding: 8px 12px; font-size: 0.88rem; }
 .toque b { color: var(--gold); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 2px; }
 .menu-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -270,10 +277,39 @@ const NUTRIENTES = [["kcal", "Calorías", "kcal", "tope"], ["proteina", "Proteí
   ["grasa", "Grasa", "g", "tope"], ["azucar", "Azúcar", "g", "tope"]];
 const COMIDA_GRANDE = 900; // kcal en una sola comida
 const fmtN = (n) => Math.round(n).toLocaleString("es-CL");
+// Modo conteo (por defecto): la app solo registra y muestra promedios; los límites y alertas se activan después,
+// cuando haya 2–4 semanas de datos. Se guarda en "propio" para que no lo pise un archivo de datos.
+const conLimites = () => !!E.perfil.propio?.limites;
 function totalesDia(fecha, extra) {
   const t = { kcal: 0, proteina: 0, carbos: 0, grasa: 0, azucar: 0 };
   [...(E.registros[fecha]?.comidas || []), ...(extra ? [extra] : [])].forEach((c) => Object.keys(t).forEach((k) => { t[k] += Number(c[k]) || 0; }));
   return t;
+}
+// Los n días anteriores a hoy (hoy queda fuera: todavía no termina)
+function diasPrevios(n) { return ultimosDias(n + 1).slice(0, -1); }
+// Promedio de los días con calorías anotadas
+function promedios(n) {
+  const dias = diasPrevios(n).filter((f) => totalesDia(f).kcal > 0), s = { kcal: 0, proteina: 0, carbos: 0, grasa: 0 };
+  dias.forEach((f) => { const t = totalesDia(f); Object.keys(s).forEach((k) => { s[k] += t[k]; }); });
+  Object.keys(s).forEach((k) => { s[k] = dias.length ? s[k] / dias.length : 0; });
+  return { dias: dias.length, ...s };
+}
+/* Gasto real estimado: lo que comes en promedio menos lo que cambia tu peso (7.700 kcal ≈ 1 kg).
+   Necesita 14 días con calorías y pesos separados por al menos 14 días, dentro de las últimas 5 semanas. */
+function estimarGasto() {
+  const ventana = diasPrevios(35), conKcal = ventana.filter((f) => totalesDia(f).kcal > 0);
+  const pesos = [...ventana, hoyISO()].filter((f) => E.registros[f]?.peso).map((f) => ({ x: Date.parse(f) / 864e5, kg: Number(E.registros[f].peso) }));
+  const span = pesos.length > 1 ? pesos[pesos.length - 1].x - pesos[0].x : 0;
+  const faltan = [];
+  if (conKcal.length < 14) faltan.push(`${14 - conKcal.length} día${14 - conKcal.length > 1 ? "s" : ""} más con calorías anotadas`);
+  if (pesos.length < 2 || span < 14) faltan.push(pesos.length < 2 ? "al menos 2 pesos separados por 2 semanas" : `pesarte de nuevo en ${Math.ceil(14 - span)} días`);
+  if (faltan.length) return { faltan };
+  const mx = pesos.reduce((a, p) => a + p.x, 0) / pesos.length, my = pesos.reduce((a, p) => a + p.kg, 0) / pesos.length;
+  const pendiente = pesos.reduce((a, p) => a + (p.x - mx) * (p.kg - my), 0) / pesos.reduce((a, p) => a + (p.x - mx) ** 2, 0); // kg por día
+  const prom = conKcal.reduce((a, f) => a + totalesDia(f).kcal, 0) / conKcal.length;
+  const gasto = prom - pendiente * 7700;
+  if (gasto < 1400 || gasto > 4500) return { faltan: ["datos más completos: el cálculo da un valor poco creíble (¿días anotados a medias?)"] };
+  return { gasto, prom, kgSemana: pendiente * 7, dias: conKcal.length };
 }
 // "cerca" desde el 90 % de un tope, "pasado" al superarlo; en la proteína, "ok" al llegar al mínimo
 function estadoNutriente(valor, meta, tipo) {
@@ -291,6 +327,7 @@ function barraNutriente([k, nombre, uni, tipo], t, m) {
 function avisoPrevio(extra) {
   if (!["kcal", "proteina", "carbos", "grasa", "azucar"].some((k) => Number(extra[k]))) return { clase: "", html: "" };
   const t = totalesDia(hoyISO(), extra), m = metas(), partes = [];
+  if (!conLimites()) return { clase: "nota", html: `Con esto llevas ${fmtN(t.kcal)} kcal y ${fmtN(t.proteina)} g de proteína hoy.` };
   NUTRIENTES.forEach(([k, nombre, uni, tipo]) => {
     if (tipo === "tope" && Number(extra[k]) && t[k] > m[k]) partes.push(`${nombre}: quedas en ${fmtN(t[k])} de ${fmtN(m[k])} ${uni} (te pasas por ${fmtN(t[k] - m[k])})`);
   });
@@ -308,6 +345,7 @@ function mostrarPrevio(pref) {
   el.className = a.clase; el.innerHTML = a.html; el.hidden = !a.html;
 }
 function toastAnotado() {
+  if (!conLimites()) { toast("Anotado en Hoy"); return; }
   const t = totalesDia(hoyISO()), m = metas();
   const pasados = NUTRIENTES.filter(([k, , , tipo]) => tipo === "tope" && t[k] > m[k]).map(([, n]) => n.toLowerCase());
   toast(pasados.length ? `Anotado · te pasaste en ${pasados.join(", ")}` : "Anotado en Hoy");
@@ -344,9 +382,9 @@ const nombreMes = (m) => MESES[Number(m.slice(5, 7)) - 1] + " " + m.slice(0, 4);
 /* ---------- Vista: Hoy ---------- */
 const ACTIVIDADES = ["Trekking", "Trote", "Acondicionamiento", "Caminata", "Otra"];
 function renderHoy() {
-  const f = hoyISO(), r = registro(f), m = metas(), t = totalesDia(f);
-  const pasados = NUTRIENTES.filter(([k, , , tipo]) => tipo === "tope" && t[k] > m[k]);
-  const grandes = r.comidas.filter((c) => (Number(c.kcal) || 0) > COMIDA_GRANDE);
+  const f = hoyISO(), r = registro(f), m = metas(), t = totalesDia(f), lim = conLimites(), p7 = promedios(7);
+  const pasados = lim ? NUTRIENTES.filter(([k, , , tipo]) => tipo === "tope" && t[k] > m[k]) : [];
+  const grandes = lim ? r.comidas.filter((c) => (Number(c.kcal) || 0) > COMIDA_GRANDE) : [];
   const quedan = m.kcal - t.kcal, faltan = m.proteina - t.proteina;
   const disp = disponibles();
   // Platos altos en proteína que se pueden hacer completos con lo que hay
@@ -365,12 +403,19 @@ function renderHoy() {
       ${pasados.map(([k, nombre, uni]) => `<li>${nombre}: te pasaste por ${fmtN(t[k] - m[k])} ${uni} (${fmtN(t[k])} de ${fmtN(m[k])})</li>`).join("")}
       ${grandes.map((c) => `<li>${esc(c.nombre)}: una sola comida de ${fmtN(c.kcal)} kcal</li>`).join("")}
     </ul></div>` : ""}
-    <div class="card">
+    ${lim ? `<div class="card">
       <h2>Hoy comiste</h2>
       ${NUTRIENTES.filter(([k]) => k !== "azucar" || t.azucar > 0).map((n) => barraNutriente(n, t, m)).join("")}
       <div class="nota">${quedan >= 0 ? `Te quedan <b>${fmtN(quedan)} kcal</b>` : `Pasaste el tope por <b>${fmtN(-quedan)} kcal</b>`}${faltan > 0 ? ` y te faltan <b>${fmtN(faltan)} g de proteína</b>.` : " y ya cumpliste tu proteína."}</div>
       ${faltan > 0 && proteicos.length ? `<div class="nota">Altos en proteína con lo que tienes: ${proteicos.map((p) => `${esc(p.plato)} (≈${p.proteina_g} g)`).join(" · ")}</div>` : ""}
-    </div>
+    </div>` : `<div class="card">
+      <div class="fila"><h2>Hoy llevas</h2><span class="nota">Modo conteo</span></div>
+      <div class="conteo">${[["kcal", "Calorías", ""], ["proteina", "Proteína", " g"], ["carbos", "Carbohidratos", " g"], ["grasa", "Grasa", " g"]].map(([k, n, u]) => `
+        <div><span class="label">${n}</span><div class="grande num">${fmtN(t[k])}<small>${u || " kcal"}</small></div>
+        <div class="nota">${p7.dias ? `prom. 7 días: ${fmtN(p7[k])}${u || " kcal"}` : "&nbsp;"}</div></div>`).join("")}</div>
+      <div class="nota">${r.comidas.length} comida${r.comidas.length === 1 ? "" : "s"} anotada${r.comidas.length === 1 ? "" : "s"}. Sin límites por ahora: anota todo lo que comas y en Progreso verás tu promedio y tu tendencia.</div>
+      ${proteicos.length ? `<div class="nota">Altos en proteína con lo que tienes: ${proteicos.map((p) => `${esc(p.plato)} (≈${p.proteina_g} g)`).join(" · ")}</div>` : ""}
+    </div>`}
     <div class="card">
       <div class="fila"><span class="label">Agua</span><span class="num">${(r.agua_ml / 1000).toLocaleString("es-CL")} / ${(m.agua_ml / 1000).toLocaleString("es-CL")} L</span></div>
       <div class="barra agua"><span style="width:${Math.min(100, r.agua_ml / m.agua_ml * 100)}%"></span></div>
@@ -383,9 +428,9 @@ function renderHoy() {
     <div class="card">
       <h2>Comidas de hoy</h2>
       ${r.comidas.length ? `<div class="lista">${r.comidas.map((c, i) => `
-        <div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">${c.estimado ? "≈ " : ""}${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}${c.carbos ? " · " + c.carbos + " g carbos" : ""}${c.grasa ? " · " + c.grasa + " g grasa" : ""}${c.comida ? " · " + c.comida : ""}${c.estimado ? " · estimado por foto" : ""}${(Number(c.kcal) || 0) > COMIDA_GRANDE ? ` · <span class="txt-rojo">comida muy grande</span>` : ""}</span>
+        <div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">${c.estimado ? "≈ " : ""}${c.proteina ? c.proteina + " g proteína" : "sin proteína anotada"}${c.kcal ? " · " + c.kcal + " kcal" : ""}${c.carbos ? " · " + c.carbos + " g carbos" : ""}${c.grasa ? " · " + c.grasa + " g grasa" : ""}${c.comida ? " · " + c.comida : ""}${c.estimado ? " · estimado por foto" : ""}${lim && (Number(c.kcal) || 0) > COMIDA_GRANDE ? ` · <span class="txt-rojo">comida muy grande</span>` : ""}</span>
         <span class="d"><button class="btn chico peligro" data-quitar-comida="${i}" aria-label="Quitar ${esc(c.nombre)}">Quitar</button></span></div>`).join("")}</div>`
-        : `<div class="nota">Anota lo que comes para ver si llegas a tu proteína. Desde Cocina, "Comí esto" lo anota solo.</div>`}
+        : `<div class="nota">Anota lo que comes: a mano, con una foto (pestaña Foto) o desde Cocina con "Comí esto".</div>`}
       <form class="form" id="f-comida">
         <label style="grid-column:1/-1">Plato
           <input type="text" id="c-nombre" list="dl-platos" placeholder="Ej: pollo con arroz" required autocomplete="off">
@@ -480,12 +525,12 @@ function leerRespuesta(txt) {
   return out.kcal || out.proteina ? out : null;
 }
 function renderFoto() {
-  const p = E.fotoPendiente, hoy = registro(hoyISO()).comidas.filter((c) => c.estimado);
+  const p = E.fotoPendiente, hoy = registro(hoyISO()).comidas.filter((c) => c.estimado), cfg = configIA();
   if (!p) {
     $("#v-foto").innerHTML = `
       <div class="card">
         <h2>Foto del plato</h2>
-        <div class="nota">Sácale una foto a lo que vas a comer. Claude estima calorías y proteína a partir de la imagen: es un valor aproximado, no exacto.</div>
+        <div class="nota">Sácale una foto a lo que vas a comer. ${cfg ? "La app la analiza sola" : "Claude estima"} calorías y proteína a partir de la imagen: es un valor aproximado, no exacto (suele errar en un tercio más o menos), pero sirve para ver tu tendencia.</div>
         <div class="chips"><label class="btn prim" for="foto-input">Sacar foto</label><label class="btn" for="foto-galeria">Elegir de la galería</label></div>
         <input type="file" id="foto-input" accept="image/*" capture="environment" hidden>
         <input type="file" id="foto-galeria" accept="image/*" hidden>
@@ -494,7 +539,8 @@ function renderFoto() {
         <h2>Hoy por foto</h2>
         ${hoy.length ? `<div class="lista">${hoy.map((c) => `<div class="item"><span class="t">${c.mini ? `<img class="miniatura" src="${c.mini}" alt="">` : ""}${esc(c.nombre)}</span><span class="s">≈ ${c.kcal || "—"} kcal · ${c.proteina || "—"} g proteína · ${esc(c.comida || "")}</span></div>`).join("")}</div>`
           : `<div class="nota">Todavía no anotas platos por foto hoy.</div>`}
-      </div>`;
+      </div>
+      ${tarjetaConfigIA(cfg)}`;
     return;
   }
   const d = p.datos || {};
@@ -507,18 +553,21 @@ function renderFoto() {
         <label style="grid-column:1/-1">¿Qué es? (opcional, ayuda a estimar)<input type="text" id="fp-que" value="${esc(p.que)}" placeholder="Ej: pollo con arroz y ensalada"></label>
       </div>
     </div>
-    <div class="card">
-      <div class="paso"><b>1</b><div><h2>Analizar con Claude</h2><div class="nota">Se abre el menú de compartir: elige la app de Claude. La foto va con el texto ya escrito; el texto también queda copiado, pégalo si no aparece.</div></div></div>
-      <button class="btn prim" id="fp-compartir">Analizar con Claude</button>
+    ${cfg ? tarjetaAnalisisIA(p) : tarjetaConfigIA(null)}
+    ${cfg ? "<details class=\"card\"><summary>Sin análisis automático: compartir con la app de Claude</summary>" : ""}
+    <div class="${cfg ? "" : "card"}">
+      <div class="paso"><b>${cfg ? "a" : "1"}</b><div><h2>Analizar con Claude</h2><div class="nota">Se abre el menú de compartir: elige la app de Claude. La foto va con el texto ya escrito; el texto también queda copiado, pégalo si no aparece.</div></div></div>
+      <button class="btn ${cfg ? "" : "prim"}" id="fp-compartir">Analizar con Claude</button>
     </div>
-    <div class="card">
-      <div class="paso"><b>2</b><div><h2>Pega la respuesta</h2><div class="nota">En Claude, copia la respuesta completa y vuelve aquí. La app lee la última línea (DESPENSA: …).</div></div></div>
+    <div class="${cfg ? "" : "card"}">
+      <div class="paso"><b>${cfg ? "b" : "2"}</b><div><h2>Pega la respuesta</h2><div class="nota">En Claude, copia la respuesta completa y vuelve aquí. La app lee la última línea (DESPENSA: …).</div></div></div>
       <textarea id="fp-resp" placeholder="Pega aquí la respuesta de Claude">${esc(p.resp || "")}</textarea>
       <div class="chips"><button class="btn chico" id="fp-pegar">Pegar del portapapeles</button></div>
       <div class="nota" id="fp-lectura">${p.resp ? (p.datos ? "Leído. Revisa y corrige si hace falta." : "No encontré calorías ni proteína en ese texto.") : ""}</div>
     </div>
+    ${cfg ? "</details>" : ""}
     <form class="card" id="f-foto">
-      <div class="paso"><b>3</b><h2>Anotar en Hoy</h2></div>
+      <div class="paso"><b>${cfg ? 2 : 3}</b><h2>Anotar en Hoy</h2></div>
       <div class="form">
         <label style="grid-column:1/-1">Plato<input type="text" id="fp-plato" required value="${esc(d.plato || p.que || "")}" placeholder="Ej: pollo con arroz"></label>
         <label>Calorías<input type="number" id="fp-kcal" inputmode="numeric" min="0" max="5000" value="${d.kcal ?? ""}"></label>
@@ -554,6 +603,130 @@ async function compartirConClaude() {
   // Sin menú de compartir (p. ej. en el PC): se descarga la foto y el texto queda copiado
   const a = document.createElement("a"); a.href = p.img; a.download = archivo.name; a.click();
   toast("Foto descargada y texto copiado: súbelos a Claude");
+}
+
+/* ---------- Análisis automático de la foto (API de Claude) ----------
+   La clave la crea el usuario en console.anthropic.com y vive solo en este teléfono (localStorage):
+   no va en el respaldo, ni en los archivos de datos, ni en GitHub. Precios en US$ por millón de tokens. */
+const MODELOS_IA = {
+  "claude-opus-5-5": ["Opus 5.5 · el más preciso", 4, 20],
+  "claude-sonnet-5-5": ["Sonnet 5.5 · mitad de costo", 2, 10],
+  "claude-haiku-5-5": ["Haiku 5.5 · casi gratis, menos preciso", 0.1, 0.5],
+};
+function configIA() { try { const c = JSON.parse(localStorage.getItem("despensa-ia") || "null"); return c && c.clave ? c : null; } catch (e) { return null; } }
+function guardarIA(c) { try { if (c) localStorage.setItem("despensa-ia", JSON.stringify(c)); else localStorage.removeItem("despensa-ia"); return true; } catch (e) { return false; } }
+const NUM = { type: "number" };
+const ESQUEMA_IA = {
+  type: "object", additionalProperties: false, required: ["plato", "alimentos", "confianza", "nota"],
+  properties: {
+    plato: { type: "string" },
+    alimentos: { type: "array", items: { type: "object", additionalProperties: false,
+      required: ["nombre", "gramos", "kcal", "proteina", "carbos", "grasa", "azucar"],
+      properties: { nombre: { type: "string" }, gramos: NUM, kcal: NUM, proteina: NUM, carbos: NUM, grasa: NUM, azucar: NUM } } },
+    confianza: { type: "string", enum: ["alta", "media", "baja"] },
+    nota: { type: "string" },
+  },
+};
+const SISTEMA_IA = `Eres un nutricionista que estima el contenido nutricional de comidas a partir de fotos, para el registro personal de un adulto en Santiago de Chile.
+- Identifica cada alimento visible y estima su peso en gramos tal como se ve (cocido si está cocido), usando como referencia el plato, los cubiertos, las manos y los envases.
+- Calcula kcal, proteína, carbohidratos, grasa y azúcar de cada alimento con valores típicos de tablas nutricionales.
+- Agrega como alimentos aparte el aceite, la mantequilla, las salsas y los aliños probables aunque no se vean del todo (en Chile es común freír y aliñar con aceite).
+- Si la persona da detalles (qué es, gramos, marca), úsalos por sobre lo que ves.
+- Sé realista: ni conservador ni exagerado. Usa nombres de Chile (palta, porotos, zapallo italiano, marraqueta).
+- "plato" es un nombre corto del plato completo. "nota" es una sola frase sobre lo más incierto de la estimación.`;
+function aplicarIA() {
+  const p = E.fotoPendiente, t = { kcal: 0, proteina: 0, carbos: 0, grasa: 0, azucar: 0 };
+  p.ia.alimentos.forEach((a) => { const f = a.gramos0 ? a.gramos / a.gramos0 : 1; Object.keys(t).forEach((k) => { t[k] += (Number(a[k]) || 0) * f; }); });
+  p.datos = { plato: p.ia.plato, ...Object.fromEntries(Object.entries(t).map(([k, v]) => [k, Math.round(v)])) };
+  guardar();
+}
+function mensajeErrorIA(e, A) {
+  if (A && e instanceof A.AuthenticationError) return "La clave no es válida (¿la borraste o la copiaste incompleta?). En Foto → Análisis automático, quítala y pégala de nuevo.";
+  if (A && e instanceof A.PermissionDeniedError) return "Esa clave no tiene permiso para usar el modelo. Revisa tu cuenta en console.anthropic.com.";
+  if (A && e instanceof A.RateLimitError) return "Demasiados análisis seguidos. Espera un minuto e intenta de nuevo.";
+  if (A && e instanceof A.APIConnectionError) return "No se pudo conectar con Claude. Revisa tu señal e intenta de nuevo.";
+  if (A && e instanceof A.APIError && /credit|balance|billing/i.test(e.message)) return "Tu cuenta de Anthropic no tiene saldo. Carga saldo en console.anthropic.com → Billing.";
+  if (A && e instanceof A.APIError) return `Claude respondió con un error (${e.status || "sin código"}). Intenta de nuevo en un rato.`;
+  if (e.message === "rechazo") return "Claude no quiso analizar esta foto. Prueba con otra foto o anótalo a mano.";
+  if (e.message === "corte" || e instanceof SyntaxError) return "La respuesta llegó incompleta. Intenta de nuevo.";
+  if (!A) return "No se pudo cargar el analizador. Abre la app una vez con internet.";
+  return "Algo falló al analizar. Intenta de nuevo o anótalo a mano.";
+}
+async function analizarConIA() {
+  const p = E.fotoPendiente, cfg = configIA();
+  if (!p || !cfg || p.analizando) return;
+  if (!navigator.onLine) { toast("Sin señal: el análisis necesita internet"); return; }
+  p.analizando = true; p.iaError = ""; renderFoto();
+  let A = null;
+  try {
+    A = (await import("./vendor/anthropic/sdk.mjs")).default;
+    const client = new A({ apiKey: cfg.clave, dangerouslyAllowBrowser: true, maxRetries: 1, timeout: 90 * 1000 });
+    const modelo = MODELOS_IA[cfg.modelo] ? cfg.modelo : "claude-opus-5-5";
+    const pedido = {
+      model: modelo, max_tokens: 16000, system: SISTEMA_IA,
+      output_config: { effort: "medium", format: { type: "json_schema", schema: ESQUEMA_IA } },
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: p.img.split(",")[1] } },
+        { type: "text", text: `Comida: ${p.comida}. Porción: ${p.tamano}.${p.que ? ` La persona dice: "${p.que}".` : ""} Estima los alimentos de la foto.` },
+      ] }],
+    };
+    // En Opus y Sonnet, si un filtro de seguridad declina por error, la API reintenta sola con otro modelo (Haiku no lo tiene)
+    const resp = modelo === "claude-haiku-5-5" ? await client.messages.create(pedido)
+      : await client.beta.messages.create({ ...pedido, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
+    if (resp.stop_reason === "refusal") throw new Error("rechazo");
+    if (resp.stop_reason === "max_tokens") throw new Error("corte");
+    const r = JSON.parse(resp.content.filter((b) => b.type === "text").map((b) => b.text).join(""));
+    const [, pin, pout] = MODELOS_IA[resp.model] || MODELOS_IA[modelo];
+    p.ia = { plato: r.plato, confianza: r.confianza, nota: r.nota, modelo: resp.model,
+      costo: ((resp.usage.input_tokens || 0) * pin + (resp.usage.output_tokens || 0) * pout) / 1e6,
+      alimentos: r.alimentos.filter((a) => a.gramos > 0 || a.kcal > 0).map((a) => ({ ...a, gramos0: a.gramos })) };
+    aplicarIA();
+  } catch (e) {
+    p.iaError = mensajeErrorIA(e, A);
+  } finally {
+    p.analizando = false; guardar(); if (vista === "foto") renderFoto();
+  }
+}
+function tarjetaConfigIA(cfg) {
+  const opciones = Object.entries(MODELOS_IA).map(([id, [n]]) => `<option value="${id}" ${(cfg?.modelo || "claude-opus-5-5") === id ? "selected" : ""}>${n}</option>`).join("");
+  if (cfg) return `<div class="card">
+      <h2>Análisis automático</h2>
+      <div class="nota">Activo · clave terminada en …${esc(cfg.clave.slice(-4))}. La clave está guardada solo en este teléfono.</div>
+      <label>Modelo<select id="ia-modelo">${opciones}</select></label>
+      <div class="chips"><button class="btn chico peligro" id="ia-quitar-clave">Quitar clave</button></div>
+    </div>`;
+  return `<form class="card" id="f-ia">
+      <h2>Activar análisis automático</h2>
+      <div class="nota">Con tu clave de la API de Claude la app analiza la foto sola, sin copiar ni pegar. Se paga aparte de tu suscripción, por uso: con Opus 5.5, unos 3 centavos de dólar por foto.</div>
+      <details><summary>Cómo sacar la clave (5 minutos)</summary><ol class="nota">
+        <li>Entra a <b>console.anthropic.com</b> y crea tu cuenta.</li>
+        <li>En <b>Billing</b> carga saldo (US$5 alcanzan para meses) y pon un <b>límite de gasto</b> mensual.</li>
+        <li>En <b>API keys</b> → <b>Create key</b>, ponle de nombre "Despensa" y cópiala (empieza con sk-ant-).</li>
+        <li>Pégala aquí abajo. Queda guardada solo en este teléfono: no va en el respaldo ni en GitHub.</li></ol></details>
+      <div class="form">
+        <label style="grid-column:1/-1">Clave<input type="password" id="ia-clave" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" required></label>
+        <label style="grid-column:1/-1">Modelo<select id="ia-modelo-nuevo">${opciones}</select></label>
+        <button class="btn prim" type="submit">Guardar clave</button>
+      </div>
+    </form>`;
+}
+function tarjetaAnalisisIA(p) {
+  const ia = p.ia;
+  return `<div class="card">
+      <div class="paso"><b>1</b><div><h2>Análisis de la foto</h2><div class="nota">Si sabes qué es o cuántos gramos tiene, escríbelo arriba ("150 g de pollo") y vuelve a analizar: mejora mucho el cálculo.</div></div></div>
+      ${p.analizando ? `<div class="nota">Analizando la foto… (unos segundos)</div>` : ""}
+      ${p.iaError ? `<div class="aviso">${esc(p.iaError)}</div>` : ""}
+      ${ia && !p.analizando ? `<div class="ia-items">${ia.alimentos.map((a, i) => {
+        const f = a.gramos0 ? a.gramos / a.gramos0 : 1;
+        return `<div class="ia-item"><span>${esc(a.nombre)}</span>
+          <input type="number" inputmode="numeric" min="0" max="3000" value="${Math.round(a.gramos)}" data-ia-gramos="${i}" aria-label="Gramos de ${esc(a.nombre)}">
+          <button class="btn chico peligro" data-ia-quitar="${i}" aria-label="Quitar ${esc(a.nombre)}">✕</button>
+          <span class="s">g · ≈${fmtN(a.kcal * f)} kcal · ${fmtN(a.proteina * f)} g proteína</span></div>`; }).join("")}
+        <div class="ia-total">Total ≈ ${fmtN(p.datos.kcal)} kcal · ${fmtN(p.datos.proteina)} g proteína · ${fmtN(p.datos.carbos)} g carbos · ${fmtN(p.datos.grasa)} g grasa</div></div>
+        <div class="nota">Confianza ${esc(ia.confianza)}. ${esc(ia.nota)}</div>
+        <div class="nota">Corrige los gramos si no calzan y el total se ajusta solo. Costo de este análisis ≈ US$${ia.costo.toLocaleString("es-CL", { maximumFractionDigits: 3 })}.</div>` : ""}
+      <div class="chips"><button class="btn ${ia ? "" : "prim"}" id="ia-analizar" ${p.analizando ? "disabled" : ""}>${ia || p.iaError ? "Volver a analizar" : "Analizar foto"}</button></div>
+    </div>`;
 }
 
 /* ---------- Vista: Despensa ---------- */
@@ -680,10 +853,16 @@ let graficos = [];
 function ultimosDias(n) { const out = []; const d = new Date(); for (let i = n - 1; i >= 0; i--) { const x = new Date(d); x.setDate(d.getDate() - i); out.push(x.toLocaleDateString("sv-SE")); } return out; }
 function renderProgreso() {
   graficos.forEach((g) => g.destroy()); graficos = [];
-  const m = metas(), dias = ultimosDias(14);
+  const m = metas(), dias = ultimosDias(14), lim = conLimites();
   const prot = dias.map((f) => (E.registros[f]?.comidas || []).reduce((a, c) => a + (Number(c.proteina) || 0), 0));
-  const kcalDia = dias.map((f) => totalesDia(f).kcal);
-  const diasSobre = kcalDia.filter((k) => k > m.kcal).length;
+  // Calorías: 30 días con la media móvil de 7 días (solo días anotados)
+  const dias30 = ultimosDias(30), kcal30 = dias30.map((f) => totalesDia(f).kcal);
+  const media7 = dias30.map((f, i) => { const v = kcal30.slice(Math.max(0, i - 6), i + 1).filter((k) => k > 0); return v.length >= 3 ? Math.round(v.reduce((a, k) => a + k, 0) / v.length) : null; });
+  const diasSobre = kcal30.filter((k) => k > m.kcal).length;
+  const p7 = promedios(7), p30 = promedios(30), g = estimarGasto();
+  const pesoAct = ultimoPeso(), protSug = pesoAct ? Math.round(pesoAct * 2 / 5) * 5 : m.proteina;
+  const kcalSug = g.gasto ? Math.max(1600, Math.round((g.gasto - 400) / 50) * 50) : null;
+  const filaProm = (n, p) => `<tr><td>${n}</td><td class="num">${p.dias ? fmtN(p.kcal) : "—"}</td><td class="num">${p.dias ? fmtN(p.proteina) + " g" : "—"}</td><td class="num">${p.dias ? fmtN(p.carbos) + " g" : "—"}</td><td class="num">${p.dias ? fmtN(p.grasa) + " g" : "—"}</td><td class="num">${p.dias}</td></tr>`;
   const agua = dias.map((f) => (E.registros[f]?.agua_ml || 0) / 1000);
   const sueno = dias.map((f) => E.registros[f]?.sueno_h ?? null);
   const pesos = Object.keys(E.registros).filter((f) => E.registros[f].peso).sort().map((f) => ({ f, kg: E.registros[f].peso }));
@@ -692,17 +871,32 @@ function renderProgreso() {
   $("#v-progreso").innerHTML = `
     <div class="grid2">
       <div class="card"><span class="label">Peso actual</span><div class="grande">${ultimoPeso() ?? "—"} <small>kg</small></div><div class="nota">Inicio: ${E.perfil.peso_inicial ?? "—"} kg</div></div>
-      <div class="card"><span class="label">Proteína promedio</span><div class="grande">${promProt || "—"} <small>g/día</small></div><div class="nota">Meta ${m.proteina} g · días anotados</div></div>
+      <div class="card"><span class="label">Proteína promedio</span><div class="grande">${promProt || "—"} <small>g/día</small></div><div class="nota">${lim ? `Meta ${m.proteina} g · ` : ""}días anotados</div></div>
     </div>
-    <div class="card"><h2>Peso</h2>${pesos.length > 1 ? `<div class="lienzo"><canvas id="g-peso" role="img" aria-label="Gráfico de peso"></canvas></div>` : `<div class="nota">Anota tu peso una vez por semana (en ayunas) y aquí verás la tendencia.</div>`}</div>
-    <div class="card"><h2>Calorías, últimos 14 días</h2>
-      <div class="nota">${diasSobre ? `<span class="txt-rojo">${diasSobre} día${diasSobre > 1 ? "s" : ""} sobre el tope</span> de ${fmtN(m.kcal)} kcal.` : `Ningún día sobre el tope de ${fmtN(m.kcal)} kcal.`} Solo cuentan los días con calorías anotadas.</div>
-      <div class="lienzo"><canvas id="g-kcal" role="img" aria-label="Gráfico de calorías diarias contra el tope"></canvas></div></div>
+    <div class="card">
+      <h2>Tu promedio</h2>
+      <div class="nota">Días ya terminados con calorías anotadas (hoy no cuenta). Si un día anotas solo una parte, el promedio sale más bajo de lo real.</div>
+      <div class="tabla-wrap"><table class="menu-tabla"><thead><tr><th></th><th>kcal</th><th>Proteína</th><th>Carbos</th><th>Grasa</th><th>Días</th></tr></thead>
+        <tbody>${filaProm("7 días", p7)}${filaProm("30 días", p30)}</tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Tu gasto real y límites sugeridos</h2>
+      ${g.gasto ? `<div class="grande num">${fmtN(g.gasto)} <small>kcal/día</small></div>
+        <div class="nota">Comes en promedio ${fmtN(g.prom)} kcal (${g.dias} días) y tu peso ${g.kgSemana < 0 ? "baja" : "sube"} ${Math.abs(g.kgSemana).toLocaleString("es-CL", { maximumFractionDigits: 2 })} kg por semana. Es una estimación: mejora con más días anotados completos.</div>
+        <div class="nota">Para bajar grasa cuidando el músculo: unas <b>${fmtN(kcalSug)} kcal</b> al día (≈0,4 kg menos por semana) y al menos <b>${protSug} g de proteína</b>.</div>
+        ${lim && m.kcal === kcalSug ? `<div class="nota">Ya usas este límite.</div>` : `<div class="chips"><button class="btn prim" id="usar-sugerido" data-kcal="${kcalSug}" data-prot="${protSug}">Usar ${fmtN(kcalSug)} kcal como límite</button></div>`}`
+        : `<div class="nota">Para calcular cuánto gastas de verdad faltan: ${g.faltan.join(" y ")}. Pésate 2 o 3 veces por semana, en ayunas, y anota todo lo que comes. Con eso la app te sugiere tus límites.</div>`}
+    </div>
+    <div class="card"><h2>Peso</h2>${pesos.length > 1 ? `<div class="lienzo"><canvas id="g-peso" role="img" aria-label="Gráfico de peso"></canvas></div>` : `<div class="nota">Anota tu peso 2 o 3 veces por semana (en ayunas) y aquí verás la tendencia.</div>`}</div>
+    <div class="card"><h2>Calorías, últimos 30 días</h2>
+      <div class="nota">${lim ? (diasSobre ? `<span class="txt-rojo">${diasSobre} día${diasSobre > 1 ? "s" : ""} sobre el tope</span> de ${fmtN(m.kcal)} kcal. ` : `Ningún día sobre el tope de ${fmtN(m.kcal)} kcal. `) : ""}La línea es tu promedio de 7 días.</div>
+      <div class="lienzo"><canvas id="g-kcal" role="img" aria-label="Gráfico de calorías diarias con promedio de 7 días"></canvas></div></div>
     <div class="card"><h2>Proteína, últimos 14 días</h2><div class="lienzo"><canvas id="g-prot" role="img" aria-label="Gráfico de proteína diaria"></canvas></div></div>
     <div class="card"><h2>Agua y sueño</h2><div class="lienzo"><canvas id="g-agua" role="img" aria-label="Gráfico de agua y sueño"></canvas></div></div>
     <form class="card" id="f-metas">
       <h2>Mis metas diarias</h2>
-      <div class="nota">La proteína es un mínimo; lo demás son topes. La app avisa en amarillo desde el 90 % y en rojo al pasarte.</div>
+      <label class="check"><input type="checkbox" id="mt-limites" ${lim ? "checked" : ""}><span class="t">Usar límites y alertas</span></label>
+      <div class="nota">${lim ? "La proteína es un mínimo; lo demás son topes. La app avisa en amarillo desde el 90 % y en rojo al pasarte." : "Modo conteo: la app solo registra, sin alertas. Estas metas quedan guardadas para cuando actives los límites."}</div>
       <div class="form">
         <label>Calorías (tope)<input type="number" id="mt-kcal" inputmode="numeric" min="1000" max="5000" value="${m.kcal}"></label>
         <label>Proteína (mín. g)<input type="number" id="mt-proteina" inputmode="numeric" min="30" max="400" value="${m.proteina}"></label>
@@ -724,13 +918,14 @@ function renderProgreso() {
   Chart.defaults.color = c("--muted"); Chart.defaults.borderColor = c("--line"); Chart.defaults.font.family = "Inter, system-ui, sans-serif";
   const etiquetas = dias.map((f) => f.slice(8) + "/" + f.slice(5, 7));
   const base = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels: { boxWidth: 12 } } }, scales: { x: { grid: { display: false } } } };
-  graficos.push(new Chart($("#g-kcal"), { type: "bar", data: { labels: etiquetas, datasets: [
-    { label: "Calorías", data: kcalDia, backgroundColor: kcalDia.map((k) => k > m.kcal ? c("--chili") : k >= m.kcal * 0.9 ? c("--warn") : c("--accent")), borderRadius: 4 },
-    { label: "Tope", data: dias.map(() => m.kcal), type: "line", borderColor: c("--ink"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 },
+  graficos.push(new Chart($("#g-kcal"), { type: "bar", data: { labels: dias30.map((f) => f.slice(8) + "/" + f.slice(5, 7)), datasets: [
+    { label: "Calorías", data: kcal30, backgroundColor: kcal30.map((k) => !lim ? c("--accent") : k > m.kcal ? c("--chili") : k >= m.kcal * 0.9 ? c("--warn") : c("--accent")), borderRadius: 3 },
+    { label: "Promedio 7 días", data: media7, type: "line", borderColor: c("--gold"), pointRadius: 0, borderWidth: 2.5, tension: .3, spanGaps: true },
+    ...(lim ? [{ label: "Tope", data: dias30.map(() => m.kcal), type: "line", borderColor: c("--ink"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 }] : []),
   ] }, options: base }));
   graficos.push(new Chart($("#g-prot"), { type: "bar", data: { labels: etiquetas, datasets: [
     { label: "Proteína (g)", data: prot, backgroundColor: c("--accent"), borderRadius: 4 },
-    { label: "Meta", data: dias.map(() => m.proteina), type: "line", borderColor: c("--chili"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 },
+    ...(lim ? [{ label: "Meta", data: dias.map(() => m.proteina), type: "line", borderColor: c("--chili"), borderDash: [6, 4], pointRadius: 0, borderWidth: 2 }] : []),
   ] }, options: base }));
   graficos.push(new Chart($("#g-agua"), { type: "line", data: { labels: etiquetas, datasets: [
     { label: "Agua (L)", data: agua, borderColor: c("--water"), backgroundColor: c("--water-soft"), fill: true, tension: .3, yAxisID: "y" },
@@ -791,6 +986,15 @@ document.addEventListener("click", (e) => {
     navigator.clipboard.readText().then((t) => { $("#fp-resp").value = t; leerYMostrar(t); guardar(); }, () => toast("Mantén presionado el cuadro y elige Pegar"));
     return;
   }
+  if (b.id === "usar-sugerido") {
+    const nuevas = { ...metas(), kcal: Number(d.kcal), proteina: Number(d.prot) };
+    if (!confirm(`¿Activar límites con ${fmtN(nuevas.kcal)} kcal y ${nuevas.proteina} g de proteína al día?`)) return;
+    E.perfil.metas = nuevas; E.perfil.propio = { ...(E.perfil.propio || {}), metas: nuevas, limites: true };
+    toast("Límites activos"); refrescar(); return;
+  }
+  if (b.id === "ia-analizar") { analizarConIA(); return; }
+  if (b.id === "ia-quitar-clave") { if (confirm("¿Quitar la clave de este teléfono?")) { guardarIA(null); renderFoto(); } return; }
+  if (d.iaQuitar !== undefined) { const p = E.fotoPendiente; p.ia.alimentos.splice(Number(d.iaQuitar), 1); aplicarIA(); renderFoto(); return; }
   if (b.id === "fp-descartar") { if (confirm("¿Descartar esta foto?")) { E.fotoPendiente = null; refrescar(); } return; }
   if (b.id === "exportar") {
     const blob = new Blob([JSON.stringify(E, null, 1)], { type: "application/json" });
@@ -811,11 +1015,18 @@ document.addEventListener("change", (e) => {
     reducirImagen(t.files[0], 800, 0.72).then((img) => {
       E.fotoPendiente = { img, comida: comidaPorHora(), tamano: "normal", que: "", resp: "", datos: null, hora: new Date().toISOString() };
       refrescar();
+      if (configIA() && navigator.onLine) analizarConIA(); // con clave, se analiza sola apenas se saca la foto
     }).catch(() => toast("No se pudo leer la foto"));
     return;
   }
+  if (t.id === "ia-modelo") { const c = configIA(); if (c) { c.modelo = t.value; guardarIA(c); toast("Modelo cambiado"); } return; }
   if (E.fotoPendiente && ["fp-comida", "fp-tamano", "fp-que"].includes(t.id)) { E.fotoPendiente[t.id.slice(3)] = t.value; guardar(); return; }
   if (t.id === "fp-resp") { guardar(); return; }
+  if (t.id === "mt-limites") { E.perfil.propio = { ...(E.perfil.propio || {}), metas: metas(), limites: t.checked }; toast(t.checked ? "Límites activos" : "Modo conteo"); refrescar(); return; }
+  if (t.dataset.iaGramos !== undefined && E.fotoPendiente?.ia) {
+    const it = E.fotoPendiente.ia.alimentos[Number(t.dataset.iaGramos)]; if (it) it.gramos = Math.max(0, Number(t.value) || 0);
+    aplicarIA(); renderFoto(); return;
+  }
   if (t.classList.contains("importar") && t.files[0]) {
     t.files[0].text().then(async (txt) => {
       const x = JSON.parse(txt);
@@ -848,7 +1059,8 @@ document.addEventListener("submit", (e) => {
   if (f.id === "f-foto" && E.fotoPendiente) {
     const p = E.fotoPendiente, n = leerFormNutri("fp");
     fetch(p.img).then((r) => r.blob()).then((b) => reducirImagen(b, 120, 0.7)).catch(() => null).then((mini) => {
-      registro(hoyISO()).comidas.push({ nombre: $("#fp-plato").value.trim(), ...n, comida: p.comida, estimado: true, mini });
+      const detalle = p.ia ? p.ia.alimentos.map((a) => `${a.nombre} ${Math.round(a.gramos)} g`).join(", ") : undefined;
+      registro(hoyISO()).comidas.push({ nombre: $("#fp-plato").value.trim(), ...n, comida: p.comida, estimado: true, mini, detalle });
       E.fotoPendiente = null; toastAnotado(); refrescar();
     });
     return;
@@ -857,8 +1069,16 @@ document.addEventListener("submit", (e) => {
     const nuevas = { ...metas() };
     ["kcal", "proteina", "carbos", "grasa", "azucar"].forEach((k) => { const v = Number($("#mt-" + k).value); if (v > 0) nuevas[k] = v; });
     // "propio" sobrevive a los archivos de datos que se carguen después
-    E.perfil.metas = nuevas; E.perfil.propio = { ...(E.perfil.propio || {}), metas: nuevas };
-    toast("Metas guardadas");
+    const limites = $("#mt-limites").checked;
+    E.perfil.metas = nuevas; E.perfil.propio = { ...(E.perfil.propio || {}), metas: nuevas, limites };
+    toast(limites ? "Metas guardadas · límites activos" : "Metas guardadas · modo conteo");
+  }
+  if (f.id === "f-ia") {
+    const clave = $("#ia-clave").value.trim();
+    if (!/^sk-ant-[\w-]{20,}$/.test(clave)) { toast("Esa clave no parece de Anthropic (empieza con sk-ant-)"); return; }
+    if (!guardarIA({ clave, modelo: $("#ia-modelo-nuevo").value })) { toast("Este navegador no deja guardar la clave"); return; }
+    toast("Clave guardada en este teléfono");
+    if (E.fotoPendiente) { renderFoto(); analizarConIA(); return; }
   }
   if (f.id === "f-lista") { agregarALista($("#l-nombre").value.trim(), null, "manual"); }
   if (f.id === "f-compra") {
